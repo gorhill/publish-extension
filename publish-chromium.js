@@ -21,17 +21,28 @@
 
 import * as fs from 'node:fs/promises';
 import * as ghapi from './github-api.js';
+import * as utils from './utils.js';
 import path from 'node:path';
 import process from 'node:process';
 
 /******************************************************************************/
 
-const githubAuth = `Bearer ${process.env.GITHUB_TOKEN}`;
-const commandLineArgs = ghapi.commandLineArgs;
-const githubOwner = commandLineArgs.ghowner;
-const githubRepo = commandLineArgs.ghrepo;
-const githubTag = commandLineArgs.ghtag;
-const cwsId = commandLineArgs.cwsid;
+const commandLineArgs = utils.commandLineArgs;
+const storeId = commandLineArgs.storeid;
+
+/******************************************************************************/
+
+async function extensionNameFromCWS() {
+    const { data } = await utils.fetchEx(
+        `https://chromewebstore.google.com/detail/${storeId}`,
+        'text'
+    );
+    if ( data === undefined ) { return '?'; }
+    const match = /<title>([^-<]+)[^<]*?<\/title>/.exec(data);
+    if ( match === null ) { return '?'; }
+    return match[1].trim();
+
+}
 
 /******************************************************************************/
 
@@ -48,12 +59,14 @@ async function publishToCWS(filePath) {
         }),
         method: 'POST',
     });
-    const authResponse = await fetch(authRequest);
-    if ( authResponse.ok === false ) {
+    const {
+        response: authResponse,
+        data: responseDict,
+    } = await utils.fetchEx(authRequest, 'json');
+    if ( responseDict === undefined ) {
         console.error(`Error: Auth failed -- server error ${authResponse.statusText}`);
         process.exit(1);
     }
-    const responseDict = await authResponse.json()
     if ( responseDict.access_token === undefined ) {
         console.error('Error: Auth failed -- no access token');
         console.error('Error: Auth failed --', JSON.stringify(responseDict, null, 2));
@@ -66,7 +79,7 @@ async function publishToCWS(filePath) {
 
     // Upload
     console.log('Uploading package...')
-    const uploadURL = `https://www.googleapis.com/upload/chromewebstore/v1.1/items/${cwsId}`;
+    const uploadURL = `https://www.googleapis.com/upload/chromewebstore/v1.1/items/${storeId}`;
     const uploadRequest = new Request(uploadURL, {
         body: data,
         headers: {
@@ -75,12 +88,14 @@ async function publishToCWS(filePath) {
         },
         method: 'PUT',
     });
-    const uploadResponse = await fetch(uploadRequest);
-    if ( uploadResponse.ok === false ) {
+    const {
+        response: uploadResponse,
+        data: uploadDict,
+    } = await utils.fetchEx(uploadRequest, 'json');
+    if ( uploadDict === undefined ) {
         console.error(`Upload failed -- server error ${uploadResponse.statusText}`);
         process.exit(1)
     }
-    const uploadDict = await uploadResponse.json();
     if ( uploadDict.uploadState !== 'SUCCESS' ) {
         console.error(`Upload failed -- server error ${JSON.stringify(uploadDict)}`);
         process.exit(1);
@@ -89,7 +104,7 @@ async function publishToCWS(filePath) {
 
     // Publish
     console.log('Publishing package...')
-    const publishURL = `https://www.googleapis.com/chromewebstore/v1.1/items/${cwsId}/publish`;
+    const publishURL = `https://www.googleapis.com/chromewebstore/v1.1/items/${storeId}/publish`;
     const publishRequest = new Request(publishURL, {
         headers: {
             'Authorization': cwsAuth,
@@ -98,12 +113,14 @@ async function publishToCWS(filePath) {
         },
         method: 'POST',
     });
-    const publishResponse = await fetch(publishRequest);
-    if ( publishResponse.ok === false ) {
+    const {
+        response: publishResponse,
+        data: publishDict,
+    } = await utils.fetchEx(publishRequest, 'json');
+    if ( publishDict === undefined ) {
         console.error(`Error: Chrome store publishing failed -- server error ${publishResponse.statusText}`);
         process.exit(1);
     }
-    const publishDict = await publishResponse.json();
     if (
         Array.isArray(publishDict.status) === false ||
         publishDict.status.includes('OK') === false
@@ -117,39 +134,59 @@ async function publishToCWS(filePath) {
 /******************************************************************************/
 
 async function main() {
-    if ( githubOwner === '' ) { return 'Need GitHub owner'; }
-    if ( githubRepo === '' ) { return 'Need GitHub repo'; }
-    if ( githubTag === '' ) { return 'Need GitHub tag'; }
-
-    ghapi.setGithubContext(githubOwner, githubRepo, githubTag, githubAuth);
+    if ( ghapi.details.owner === '' ) { return 'Need GitHub owner'; }
+    if ( ghapi.details.repo === '' ) { return 'Need GitHub repo'; }
+    if ( ghapi.details.tag === '' ) { return 'Need GitHub tag'; }
 
     const assetInfo = await ghapi.getAssetInfo('chromium');
     if ( assetInfo === undefined ) {
         process.exit(1);
     }
 
-    await ghapi.prompt([
-        'Publish to Chrome store:',
-        `  GitHub owner: "${githubOwner}"`,
-        `  GitHub repo: "${githubRepo}"`,
-        `  Release tag: "${githubTag}"`,
-        `  Asset name: "${assetInfo.name}"`,
-        `  Extension id: ${cwsId}`,
-        `  Publish? (enter "yes"): `,
-    ].join('\n'));
-
     // Fetch asset from GitHub repo
     const filePath = await ghapi.downloadAssetFromRelease(assetInfo);
     console.log('Asset saved at', filePath);
+
+    // Confirm the package being uploaded matches the store listing
+    const manifest = await utils.getManifestFromPackage(filePath);
+    if ( manifest === undefined ) {
+        process.exit(1);
+    }
+    const cwsName = await extensionNameFromCWS(manifest.name);
+    if ( manifest.name !== cwsName ) {
+        console.log(`Extension name mismatch between manifest and CWS:\n  "${manifest.name}" != "${cwsName}"`);
+        process.exit(1);
+    }
+
+    const versionName = ghapi.details.tag.replace(/^\D+/, '');
+    if ( versionName !== manifest.version ) {
+        manifest.version_name = versionName;
+        await utils.updateManifestInPackage(filePath, manifest);
+    }
+
+    await utils.prompt([
+        'Publish to Chrome store:',
+        `  GitHub owner: "${ghapi.details.owner}"`,
+        `  GitHub repo: "${ghapi.details.repo}"`,
+        `  Release tag: "${ghapi.details.tag}"`,
+        `  Asset name: "${assetInfo.name}"`,
+        `  Extension names: "${manifest.name}" / "${cwsName}"`,
+        `  Extension id: ${storeId}`,
+        `  Extension version: ${manifest.version}`,
+        `  Extension version name: ${manifest.version_name || '[empty]'}`,
+        `Publish? (enter "yes"): `,
+    ].join('\n'));
 
     // Upload to Chrome Web Store
     await publishToCWS(filePath);
 
     // Clean up
     if ( commandLineArgs.keep !== true ) {
-        const tmpdir = path.dirname(filePath);
-        console.log(`Removing ${tmpdir}`);
-        ghapi.shellExec(`rm -rf "${tmpdir}"`);
+        {
+            const tmpdir = path.dirname(filePath);
+            console.log(`Removing ${tmpdir}`);
+            utils.shellExec(`rm -rf "${tmpdir}"`);
+        }
     }
 
     console.log('Done');

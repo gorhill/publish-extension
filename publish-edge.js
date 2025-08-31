@@ -21,24 +21,35 @@
 
 import * as fs from 'node:fs/promises';
 import * as ghapi from './github-api.js';
+import * as utils from './utils.js';
 import path from 'node:path';
 import process from 'node:process';
 
 /******************************************************************************/
 
-const githubAuth = `Bearer ${process.env.GITHUB_TOKEN}`;
-const commandLineArgs = ghapi.commandLineArgs;
-const githubOwner = commandLineArgs.ghowner;
-const githubRepo = commandLineArgs.ghrepo;
-const githubTag = commandLineArgs.ghtag;
-const edgeId = commandLineArgs.edgeid;
+const commandLineArgs = utils.commandLineArgs;
+const storeId = commandLineArgs.storeid;
+const productId = commandLineArgs.productid;
+
+/******************************************************************************/
+
+async function extensionNameFromEdgeStore() {
+    const { data } = await utils.fetchEx(
+        `https://microsoftedge.microsoft.com/addons/detail/${storeId}`,
+        'text'
+    );
+    if ( data === undefined ) { return '?'; }
+    const match = /<title>([^-<]+)[^<]*?<\/title>/.exec(data);
+    if ( match === null ) { return '?'; }
+    return match[1].trim();
+}
 
 /******************************************************************************/
 
 async function publishToEdgeStore(filePath) {
     const edgeApiKey = process.env.EDGE_API_KEY;
     const edgeClientId = process.env.EDGE_CLIENT_ID;
-    const uploadURL = `https://api.addons.microsoftedge.microsoft.com/v1/products/${edgeId}/submissions/draft/package`;
+    const uploadURL = `https://api.addons.microsoftedge.microsoft.com/v1/products/${productId}/submissions/draft/package`;
 
     // Read package
     const data = await fs.readFile(filePath);
@@ -54,7 +65,7 @@ async function publishToEdgeStore(filePath) {
         },
         method: 'POST',
     });
-    const uploadResponse = await fetch(uploadRequest);
+    const { response: uploadResponse } = await utils.fetchEx(uploadRequest);
     if ( uploadResponse.status !== 202 ) {
         console.log(`Upload failed -- server error ${uploadResponse.status}`);
         process.exit(1);
@@ -68,10 +79,10 @@ async function publishToEdgeStore(filePath) {
 
     // Check upload status
     console.log('Checking upload status...');
-    const interval = 60; //  check every 60 seconds
-    let countdown = 60 * 60 / interval; // for at most 60 minutes
+    const interval = 60;                // check every 60 seconds
+    let countdown = 15 * 60 / interval; // for at most 15 minutes
     for (;;) {
-        await ghapi.sleep(interval);
+        await utils.sleep(interval);
         countdown -= 1
         if ( countdown <= 0 ) {
             console.log('Error: Microsoft store timed out')
@@ -83,12 +94,14 @@ async function publishToEdgeStore(filePath) {
                 'X-ClientID': edgeClientId,
             },
         });
-        const uploadStatusResponse = await fetch(uploadStatusRequest);
+        const {
+            response: uploadStatusResponse,
+            data: uploadStatusDict,
+        } = await utils.fetchEx(uploadStatusRequest, 'json');
         if ( uploadStatusResponse.status !== 200 ) {
             console.log(`Upload status check failed -- server error ${uploadStatusResponse.status}`);
             process.exit(1);
         }
-        const uploadStatusDict = await uploadStatusResponse.json();
         const { status } = uploadStatusDict;
         if ( status === undefined || status === 'Failed' ) {
             console.log(`Upload status check failed -- server error ${status}`);
@@ -102,7 +115,7 @@ async function publishToEdgeStore(filePath) {
     // Publish
     // https://learn.microsoft.com/en-us/microsoft-edge/extensions-chromium/update/api/addons-api-reference?tabs=v1-1#publish-the-product-draft-submission
     console.log('Publish package...')
-    const publishURL = `https://api.addons.microsoftedge.microsoft.com/v1/products/${edgeId}/submissions`;
+    const publishURL = `https://api.addons.microsoftedge.microsoft.com/v1/products/${productId}/submissions`;
     const publishNotes = {
         'Notes': 'See official release notes at <https://github.com/gorhill/uBlock/releases>'
     }
@@ -114,7 +127,7 @@ async function publishToEdgeStore(filePath) {
         },
         method: 'POST',
     });
-    const publishResponse = await fetch(publishRequest);
+    const { response: publishResponse } = await utils.fetchEx(publishRequest);
     if ( publishResponse.status !== 202 ) {
         console.log(`Publish failed -- server error ${publishResponse.status}`);
         process.exit(1);
@@ -129,30 +142,65 @@ async function publishToEdgeStore(filePath) {
 /******************************************************************************/
 
 async function main() {
-    if ( githubOwner === '' ) { return 'Need GitHub owner'; }
-    if ( githubRepo === '' ) { return 'Need GitHub repo'; }
-    if ( githubTag === '' ) { return 'Need GitHub tag'; }
-
-    ghapi.setGithubContext(githubOwner, githubRepo, githubTag, githubAuth);
+    if ( ghapi.details.owner === '' ) { return 'Need GitHub owner'; }
+    if ( ghapi.details.repo === '' ) { return 'Need GitHub repo'; }
+    if ( ghapi.details.tag === '' ) { return 'Need GitHub tag'; }
 
     const assetInfo = await ghapi.getAssetInfo('chromium');
     if ( assetInfo === undefined ) {
         process.exit(1);
     }
 
-    await ghapi.prompt([
-        'Publish to Edge store:',
-        `GitHub owner: "${githubOwner}"`,
-        `GitHub repo: "${githubRepo}"`,
-        `Release tag: "${githubTag}"`,
-        `Asset name: "${assetInfo.name}"`,
-        `Product id: ${edgeId}`,
-        `Publish? (enter "yes"): `,
-    ].join('\n'));
-
     // Fetch asset from GitHub repo
     const filePath = await ghapi.downloadAssetFromRelease(assetInfo);
     console.log('Asset saved at', filePath);
+
+    // Confirm the package being uploaded matches the store listing
+    const manifest = await utils.getManifestFromPackage(filePath);
+    if ( manifest === undefined ) {
+        process.exit(1);
+    }
+    const edgeStoreName = await extensionNameFromEdgeStore(manifest.name);
+    if ( manifest.name !== edgeStoreName ) {
+        console.log(`Extension name mismatch between manifest and Edge Store:\n  "${manifest.name}" != "${edgeStoreName}"`);
+        process.exit(1);
+    }
+
+    let updateManifest = false;
+
+    if ( commandLineArgs.datebasedmajor !== undefined ) {
+        const now = new Date();
+        const year = now.getUTCFullYear();
+        const month = now.getUTCMonth() + 1;
+        const day = now.getUTCDate();
+        const major = `${year}.${month * 100 + day}`;
+        manifest.version = manifest.version.replace(/^\d+/, major);
+        updateManifest = true;
+    }
+
+    const versionName = ghapi.details.tag.replace(/^\D+/, '');
+    if ( versionName !== manifest.version ) {
+        manifest.version_name = versionName;
+        updateManifest = true;
+    }
+
+    if ( updateManifest ) {
+        await utils.updateManifestInPackage(filePath, manifest);
+    }
+
+    await utils.prompt([
+        'Publish to Edge store:',
+        `  GitHub owner: "${ghapi.details.owner}"`,
+        `  GitHub repo: "${ghapi.details.repo}"`,
+        `  Release tag: "${ghapi.details.tag}"`,
+        `  Asset name: "${assetInfo.name}"`,
+        `  Extension names: "${manifest.name}" / "${edgeStoreName}"`,
+        `  Extension id: ${storeId}`,
+        `  Extension version: ${manifest.version}`,
+        `  Extension version name: ${manifest.version_name || '[empty]'}`,
+        `  Product id: ${productId}`,
+        `Publish? (enter "yes"): `,
+    ].join('\n'));
 
     // Upload to Edge Store
     await publishToEdgeStore(filePath);
@@ -161,7 +209,7 @@ async function main() {
     if ( commandLineArgs.keep !== true ) {
         const tmpdir = path.dirname(filePath);
         console.log(`Removing ${tmpdir}`);
-        ghapi.shellExec(`rm -rf "${tmpdir}"`);
+        utils.shellExec(`rm -rf "${tmpdir}"`);
     }
 
     console.log('Done');

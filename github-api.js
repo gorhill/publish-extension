@@ -20,73 +20,24 @@
 */
 
 import * as fs from 'node:fs/promises';
-import * as readline from 'node:readline/promises';
-import { execSync } from 'node:child_process';
-import os from 'node:os';
+import { commandLineArgs, fetchEx } from './utils.js';
 import path from 'node:path';
 import process from 'node:process';
+import { shellExec } from './utils.js';
 
 /******************************************************************************/
 
-function voidFunc() {
-}
+const githubAuth = `Bearer ${process.env.GITHUB_TOKEN}`;
+const githubOwner = commandLineArgs.ghowner;
+const githubRepo = commandLineArgs.ghrepo;
+const githubTag = commandLineArgs.ghtag;
 
-/******************************************************************************/
-
-export async function sleep(seconds) {
-    return new Promise(resolve => {
-        setTimeout(resolve, seconds * 1000);
-    });
-}
-
-/******************************************************************************/
-
-export async function prompt(message) {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-    });
-    const answer = await rl.question(message);
-    if ( answer !== 'yes' ) {
-        console.log('Aborted');
-        process.exit(1);
-    }
-    return true;
-}
-
-/******************************************************************************/
-
-function reportFetchError(response) {
-    console.log(response.statusText);
-}
-
-/******************************************************************************/
-
-let githubOwner = '';
-let githubRepo = '';
-let githubTag = '';
-let githubAuth = '';
-
-export function setGithubContext(owner, repo, tag, auth) {
-    githubOwner = owner;
-    githubRepo = repo;
-    githubTag = tag;
-    githubAuth = auth;
-}
-
-/******************************************************************************/
-
-export async function getRepoRoot() {
-    const homeDir = os.homedir();
-    let currentDir = process.cwd();
-    for (;;) {
-        const fileName = `${currentDir}/.git`;
-        const stat = await fs.stat(fileName).catch(voidFunc);
-        if ( stat !== undefined ) { return currentDir; }
-        currentDir = path.resolve(currentDir, '..');
-        if ( currentDir.startsWith(homeDir) === false ) { return; }
-    }
-}
+export const details = {
+    auth: githubAuth,
+    owner: githubOwner,
+    repo: githubRepo,
+    tag: githubTag,
+};
 
 /******************************************************************************/
 
@@ -98,12 +49,25 @@ export async function getReleaseInfo() {
             Authorization: githubAuth,
         },
     });
-    const response = await fetch(request).catch(voidFunc);
+    const { response, data } = await fetchEx(request, 'json');
     if ( response === undefined ) { return; }
-    if ( response.ok !== true ) { return reportFetchError(response); }
-    const releaseInfo = await response.json().catch(voidFunc);
-    if ( releaseInfo === undefined ) { return; }
-    return releaseInfo;
+    if ( data === undefined ) { return; }
+    return data;
+}
+
+/******************************************************************************/
+
+export async function getLatestReleaseInfo() {
+    console.log(`Fetching latest release info for ${githubOwner}/${githubRepo} from GitHub`);
+    const releaseInfoUrl =  `https://api.github.com/repos/${githubOwner}/${githubRepo}/releases/latest`;
+    const request = new Request(releaseInfoUrl, {
+        headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: githubAuth,
+        },
+    });
+    const { data } = await fetchEx(request, 'json');
+    return data;
 }
 
 /******************************************************************************/
@@ -128,9 +92,8 @@ export async function downloadAssetFromRelease(assetInfo) {
             Accept: 'application/octet-stream',
         },
     });
-    const response = await fetch(request).catch(voidFunc);
-    if ( response.ok !== true ) { return; }
-    const data = await response.bytes().catch(voidFunc);
+    const { response, data } = await fetchEx(request, 'bytes');
+    if ( response === undefined ) { return; }
     if ( data === undefined ) { return; }
     const tempDir = await fs.mkdtemp('/tmp/github-asset-');
     const fileName = `${tempDir}/${assetInfo.name}`;
@@ -157,9 +120,9 @@ export async function uploadAssetToRelease(assetPath, mimeType) {
         },
         method: 'POST',
     });
-    const response = await fetch(request).catch(( ) => { });
+    const { response, data: json } = await fetchEx(request);
     if ( response === undefined ) { return; }
-    const json = await response.json();
+    if ( json === undefined ) { return; };
     console.log(json);
     return json;
 }
@@ -174,49 +137,36 @@ export async function deleteAssetFromRelease(assetURL) {
         },
         method: 'DELETE',
     });
-    const response = await fetch(request);
-    return response.ok;
+    const { response } = await fetchEx(request);
+    return response?.ok;
 }
 
 /******************************************************************************/
 
-export async function getManifest(path) {
-    const text = await fs.readFile(path, { encoding: 'utf8' });
-    return JSON.parse(text);
+export async function updateFirefoxAutoUpdateFile(updateFilePath, details) {
+    const { amoExtensionId, manifest, signedPackageName } = details;
+    if ( amoExtensionId === undefined ) { return; }
+    if ( manifest === undefined ) { return; }
+    if ( signedPackageName === undefined ) { return; }
+    let r = shellExec(`git diff --staged`);
+    if ( r ) { return; }
+    const text = await fs.readFile(updateFilePath, {
+        encoding: 'utf8'
+    }).catch(reason => {
+        console.log(`${reason}`);
+    });
+    if ( text === undefined ) { return; }
+    const data = JSON.parse(text);
+    const update = data.addons[amoExtensionId].updates[0];
+    update.version = manifest.version;
+    update.update_link = `https://github.com/${githubOwner}/${githubRepo}/releases/download/${githubTag}/${signedPackageName}`;
+    await fs.writeFile(updateFilePath, JSON.stringify(data, null, 2));
+    shellExec(`git add -u "${updateFilePath}"`);
+    r = shellExec(`git status -s "${updateFilePath}"`);
+    if ( Boolean(r) === false ) { return; }
+    shellExec(`
+        git commit -m 'Make Firefox dev build auto-update' "${updateFilePath}"
+        git push origin HEAD
+    `);
+    return true;
 }
-
-/******************************************************************************/
-
-export async function shellExec(text) {
-    let command = '';
-    for ( const line of text.split(/[\n\r]+/) ) {
-        command += line.trimEnd();
-        if ( command.endsWith('\\') ) {
-            command = command.slice(0, -1);
-            continue;
-        }
-        command = command.trim();
-        if ( command === '' ) { continue; }
-        execSync(command);
-        command = '';
-    }
-}
-
-/******************************************************************************/
-
-export const commandLineArgs = (( ) => {
-    const args = Object.create(null);
-    let name, value;
-    for ( const arg of process.argv.slice(2) ) {
-        const pos = arg.indexOf('=');
-        if ( pos === -1 ) {
-            name = arg;
-            value = true;
-        } else {
-            name = arg.slice(0, pos);
-            value = arg.slice(pos+1);
-        }
-        args[name] = value;
-    }
-    return args;
-})();
