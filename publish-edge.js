@@ -199,8 +199,6 @@ async function main() {
         `Publish? (enter "yes"): `,
     ].join('\n'));
 
-    process.exit(1);
-
     // Upload to Edge Store
     await publishToEdgeStore(packagePath);
 
