@@ -142,30 +142,27 @@ async function publishToEdgeStore(filePath) {
 /******************************************************************************/
 
 async function main() {
-    if ( ghapi.details.owner === '' ) { return 'Need GitHub owner'; }
-    if ( ghapi.details.repo === '' ) { return 'Need GitHub repo'; }
-    if ( ghapi.details.tag === '' ) { return 'Need GitHub tag'; }
-
-    const assetInfo = await ghapi.getAssetInfo('chromium');
+    const assetInfo = await ghapi.getAssetInfo();
     if ( assetInfo === undefined ) {
         process.exit(1);
     }
 
     // Fetch asset from GitHub repo
-    const filePath = await ghapi.downloadAssetFromRelease(assetInfo);
-    console.log('Asset saved at', filePath);
+    const packagePath = await ghapi.downloadAssetFromRelease(assetInfo);
+    console.log('Asset saved at', packagePath);
 
     // Confirm the package being uploaded matches the store listing
-    const manifest = await utils.getManifestFromPackage(filePath);
+    const edgeStoreName = await extensionNameFromEdgeStore();
+    const manifestName = await utils.getExtensionNameFromPackage(packagePath);
+    if ( manifestName && manifestName !== edgeStoreName ) {
+        console.log(`Extension name mismatch between manifest and Edge Store:\n  "${manifestName}" != "${edgeStoreName}"`);
+        process.exit(1);
+    }
+
+    const manifest = await utils.getManifestFromPackage(packagePath);
     if ( manifest === undefined ) {
         process.exit(1);
     }
-    const edgeStoreName = await extensionNameFromEdgeStore(manifest.name);
-    if ( manifest.name !== edgeStoreName ) {
-        console.log(`Extension name mismatch between manifest and Edge Store:\n  "${manifest.name}" != "${edgeStoreName}"`);
-        process.exit(1);
-    }
-
     let updateManifest = false;
 
     if ( commandLineArgs.datebasedmajor !== undefined ) {
@@ -185,7 +182,7 @@ async function main() {
     }
 
     if ( updateManifest ) {
-        await utils.updateManifestInPackage(filePath, manifest);
+        await utils.updateManifestInPackage(packagePath, manifest);
     }
 
     await utils.prompt([
@@ -194,7 +191,7 @@ async function main() {
         `  GitHub repo: "${ghapi.details.repo}"`,
         `  Release tag: "${ghapi.details.tag}"`,
         `  Asset name: "${assetInfo.name}"`,
-        `  Extension names: "${manifest.name}" / "${edgeStoreName}"`,
+        `  Extension names: "${manifestName}" / "${edgeStoreName}"`,
         `  Extension id: ${storeId}`,
         `  Extension version: ${manifest.version}`,
         `  Extension version name: ${manifest.version_name || '[empty]'}`,
@@ -202,12 +199,14 @@ async function main() {
         `Publish? (enter "yes"): `,
     ].join('\n'));
 
+    process.exit(1);
+
     // Upload to Edge Store
-    await publishToEdgeStore(filePath);
+    await publishToEdgeStore(packagePath);
 
     // Clean up
     if ( commandLineArgs.keep !== true ) {
-        const tmpdir = path.dirname(filePath);
+        const tmpdir = path.dirname(packagePath);
         console.log(`Removing ${tmpdir}`);
         utils.shellExec(`rm -rf "${tmpdir}"`);
     }

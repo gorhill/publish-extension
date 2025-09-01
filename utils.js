@@ -100,14 +100,22 @@ export async function getManifest(path) {
 
 /******************************************************************************/
 
-export async function getManifestFromPackage(packagePath) {
+export async function getFileFromPackage(packagePath, needlePath) {
     const tempDir = await fs.mkdtemp('/tmp/github-deflated-asset-');
-    const manifestPath = await shellExec(`unzip -Z1 ${packagePath} | grep manifest.json`);
-    if ( Boolean(manifestPath) === false ) { return; }
-    await shellExec(`unzip ${packagePath} ${manifestPath} -d ${tempDir}`);
-    const text = await fs.readFile(`${tempDir}/${manifestPath}`, { encoding: 'utf8' });
+    const filePath = await shellExec(`unzip -Z1 ${packagePath} | grep "${needlePath}"`);
+    if ( Boolean(filePath) === false ) { return; }
+    await shellExec(`unzip ${packagePath} ${filePath} -d ${tempDir}`);
+    const text = await fs.readFile(`${tempDir}/${filePath}`, { encoding: 'utf8' });
     if ( text === undefined ) { return; }
     await shellExec(`rm -rf "${tempDir}"`);
+    return text;
+}
+
+/******************************************************************************/
+
+export async function getManifestFromPackage(packagePath) {
+    const text = await getFileFromPackage(packagePath, 'manifest.json');
+    if ( text === undefined ) { return; }
     return JSON.parse(text);
 }
 
@@ -125,6 +133,21 @@ export async function updateManifestInPackage(packagePath, json) {
     await shellExec(`cd ${tempDir} && zip -qr ${packagePath} ${manifestPath} && cd -`);
     await shellExec(`rm -rf "${tempDir}"`);
     return true;
+}
+
+/******************************************************************************/
+
+export async function getExtensionNameFromPackage(packagePath) {
+    const manifest = await getManifestFromPackage(packagePath);
+    if ( manifest === undefined ) { return; }
+    if ( manifest.name !== "__MSG_extName__" ) { return name; }
+    const lang = manifest.default_locale;
+    if ( lang === undefined ) { return; }
+    const text = await getFileFromPackage(packagePath, `_locales/${lang}/messages.json`);
+    if ( text === undefined ) { return; }
+    const messages = JSON.parse(text);
+    return messages.extName.message;
+    
 }
 
 /******************************************************************************/
@@ -166,7 +189,9 @@ export async function shellExec(text) {
         }
         command = command.trim();
         if ( command === '' ) { continue; }
-        console.log(`Executing: ${command}`);
+        if ( commandLineArgs.verbose ) {
+            console.log(`Executing: ${command}`);
+        }
         r = execSync(command, { encoding: 'utf8' });
         command = '';
     }

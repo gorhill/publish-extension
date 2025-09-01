@@ -134,34 +134,37 @@ async function publishToCWS(filePath) {
 /******************************************************************************/
 
 async function main() {
-    if ( ghapi.details.owner === '' ) { return 'Need GitHub owner'; }
-    if ( ghapi.details.repo === '' ) { return 'Need GitHub repo'; }
-    if ( ghapi.details.tag === '' ) { return 'Need GitHub tag'; }
-
-    const assetInfo = await ghapi.getAssetInfo('chromium');
+    const assetInfo = await ghapi.getAssetInfo();
     if ( assetInfo === undefined ) {
         process.exit(1);
     }
 
     // Fetch asset from GitHub repo
-    const filePath = await ghapi.downloadAssetFromRelease(assetInfo);
-    console.log('Asset saved at', filePath);
+    const packagePath = await ghapi.downloadAssetFromRelease(assetInfo);
+    console.log('Asset saved at', packagePath);
 
     // Confirm the package being uploaded matches the store listing
-    const manifest = await utils.getManifestFromPackage(filePath);
-    if ( manifest === undefined ) {
-        process.exit(1);
-    }
-    const cwsName = await extensionNameFromCWS(manifest.name);
-    if ( manifest.name !== cwsName ) {
+    const cwsName = await extensionNameFromCWS();
+    const manifestName = await utils.getExtensionNameFromPackage(packagePath);
+    if ( manifestName && manifestName !== cwsName ) {
         console.log(`Extension name mismatch between manifest and CWS:\n  "${manifest.name}" != "${cwsName}"`);
         process.exit(1);
     }
 
+    const manifest = await utils.getManifestFromPackage(packagePath);
+    if ( manifest === undefined ) {
+        process.exit(1);
+    }
+    let updateManifest = false;
+
     const versionName = ghapi.details.tag.replace(/^\D+/, '');
     if ( versionName !== manifest.version ) {
         manifest.version_name = versionName;
-        await utils.updateManifestInPackage(filePath, manifest);
+        updateManifest = true;
+    }
+
+    if ( updateManifest ) {
+        await utils.updateManifestInPackage(packagePath, manifest);
     }
 
     await utils.prompt([
@@ -170,7 +173,7 @@ async function main() {
         `  GitHub repo: "${ghapi.details.repo}"`,
         `  Release tag: "${ghapi.details.tag}"`,
         `  Asset name: "${assetInfo.name}"`,
-        `  Extension names: "${manifest.name}" / "${cwsName}"`,
+        `  Extension names: "${manifestName}" / "${cwsName}"`,
         `  Extension id: ${storeId}`,
         `  Extension version: ${manifest.version}`,
         `  Extension version name: ${manifest.version_name || '[empty]'}`,
@@ -178,12 +181,12 @@ async function main() {
     ].join('\n'));
 
     // Upload to Chrome Web Store
-    await publishToCWS(filePath);
+    await publishToCWS(packagePath);
 
     // Clean up
     if ( commandLineArgs.keep !== true ) {
         {
-            const tmpdir = path.dirname(filePath);
+            const tmpdir = path.dirname(packagePath);
             console.log(`Removing ${tmpdir}`);
             utils.shellExec(`rm -rf "${tmpdir}"`);
         }

@@ -31,17 +31,44 @@ const githubAuth = `Bearer ${process.env.GITHUB_TOKEN}`;
 const githubOwner = commandLineArgs.ghowner;
 const githubRepo = commandLineArgs.ghrepo;
 const githubTag = commandLineArgs.ghtag;
+const githubAsset = commandLineArgs.ghasset;
 
 export const details = {
     auth: githubAuth,
     owner: githubOwner,
     repo: githubRepo,
     tag: githubTag,
+    asset: githubAsset,
 };
 
 /******************************************************************************/
 
+function validateGithubToken() {
+    if ( githubAuth === '' ) {
+        throw new Error('Need GitHub token');
+    }
+}
+
+function validateGithubVars() {
+    validateGithubToken();
+    if ( githubOwner === '' ) {
+        throw new Error('Need GitHub owner');
+    }
+    if ( githubRepo === '' ) {
+        throw new Error('Need GitHub repo');
+    }
+    if ( githubTag === '' ) {
+        throw new Error('Need GitHub tag');
+    }
+    if ( githubAsset === '' ) {
+        throw new Error('Need GitHub asset name');
+    }
+}
+
+/******************************************************************************/
+
 export async function getReleaseInfo() {
+    validateGithubVars();
     console.log(`Fetching release info for ${githubOwner}/${githubRepo}/${githubTag} from GitHub`);
     const releaseInfoUrl =  `https://api.github.com/repos/${githubOwner}/${githubRepo}/releases/tags/${githubTag}`;
     const request = new Request(releaseInfoUrl, {
@@ -58,6 +85,7 @@ export async function getReleaseInfo() {
 /******************************************************************************/
 
 export async function getLatestReleaseInfo() {
+    validateGithubVars();
     console.log(`Fetching latest release info for ${githubOwner}/${githubRepo} from GitHub`);
     const releaseInfoUrl =  `https://api.github.com/repos/${githubOwner}/${githubRepo}/releases/latest`;
     const request = new Request(releaseInfoUrl, {
@@ -72,18 +100,19 @@ export async function getLatestReleaseInfo() {
 
 /******************************************************************************/
 
-export async function getAssetInfo(assetName) {
+export async function getAssetInfo() {
     const releaseInfo = await getReleaseInfo();
     if ( releaseInfo === undefined ) { return; }
     if ( releaseInfo.assets === undefined ) { return; }
     for ( const asset of releaseInfo.assets ) {
-        if ( asset.name.includes(assetName) ) { return asset; }
+        if ( asset.name.includes(githubAsset) ) { return asset; }
     }
 }
 
 /******************************************************************************/
 
 export async function downloadAssetFromRelease(assetInfo) {
+    validateGithubToken();
     const assetURL = assetInfo.url;
     console.log(`Fetching ${assetURL}`);
     const request = new Request(assetURL, {
@@ -104,6 +133,7 @@ export async function downloadAssetFromRelease(assetInfo) {
 /******************************************************************************/
 
 export async function uploadAssetToRelease(assetPath, mimeType) {
+    validateGithubToken();
     console.log(`Uploading "${assetPath}" to GitHub...`);
     const data = await fs.readFile(assetPath).catch(( ) => { });
     if ( data === undefined ) { return; }
@@ -130,6 +160,7 @@ export async function uploadAssetToRelease(assetPath, mimeType) {
 /******************************************************************************/
 
 export async function deleteAssetFromRelease(assetURL) {
+    validateGithubToken();
     print(`Remove ${assetURL} from GitHub release ${githubTag}...`);
     const request = new Request(assetURL, {
         headers: {
@@ -144,6 +175,7 @@ export async function deleteAssetFromRelease(assetURL) {
 /******************************************************************************/
 
 export async function updateFirefoxAutoUpdateFile(updateFilePath, details) {
+    validateGithubVars();
     const { amoExtensionId, manifest, signedPackageName } = details;
     if ( amoExtensionId === undefined ) { return; }
     if ( manifest === undefined ) { return; }

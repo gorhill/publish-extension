@@ -140,9 +140,6 @@ async function requestSignature(packagePathIn, packagePathOut, manifest) {
 /******************************************************************************/
 
 async function main() {
-    if ( ghapi.details.owner === '' ) { return 'Need GitHub owner'; }
-    if ( ghapi.details.repo === '' ) { return 'Need GitHub repo'; }
-    if ( ghapi.details.tag === '' ) { return 'Need GitHub tag'; }
     if ( /^(un)?listed$/.test(amoChannel) === false ) { return 'Need AMO channel'; }
 
     const assetInfo = await ghapi.getAssetInfo('firefox');
