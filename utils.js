@@ -140,7 +140,7 @@ export async function updateManifestInPackage(packagePath, json) {
 export async function getExtensionNameFromPackage(packagePath) {
     const manifest = await getManifestFromPackage(packagePath);
     if ( manifest === undefined ) { return; }
-    if ( manifest.name !== "__MSG_extName__" ) { return name; }
+    if ( manifest.name !== "__MSG_extName__" ) { return manifest.name; }
     const lang = manifest.default_locale;
     if ( lang === undefined ) { return; }
     const text = await getFileFromPackage(packagePath, `_locales/${lang}/messages.json`);
