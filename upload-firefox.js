@@ -34,92 +34,39 @@ const autoUpdatepath = commandLineArgs.updatepath || '';
 
 /******************************************************************************/
 
-// Stolen from:
-// https://github.com/mozilla/web-ext/blob/960d49c3d5/src/util/submit-addon.js#L90-L111
-
-async function fileFromSync(filePath) {
-    // create a File blob from a file path, and ensure it to have the file path basename
-    // as the associated filename, the AMO server API will be checking it on the form-data
-    // submitted and fail with the error message:
-    // "Unsupported file type, please upload a supported file (.crx, .xpi, .zip)."
-    const fileData = await fs.readFile(filePath);
-    return new File([ fileData ], path.basename(filePath));
-}
-
-/******************************************************************************/
-
-async function requestSignature(packagePathIn, packagePathOut, manifest) {
+async function checkSignature(packagePathIn, packagePathOut, manifest) {
     const jwt = new utils.JWT(process.env.AMO_API_KEY, process.env.AMO_SECRET);
-
-    const signingRequestURL =`https://addons.mozilla.org/api/v4/addons/${amoExtensionId}/versions/${manifest.version}/`;
-    const formData = new FormData();
-    formData.set('channel', amoChannel);
-    formData.set('upload', await fileFromSync(packagePathIn));
-    const signingRequest = new Request(signingRequestURL, {
-        body: formData,
+    console.log('Waiting for AMO to process the request to sign the self-hosted xpi package...');
+    const signingCheckURL =
+    `https://addons.mozilla.org/api/v5/addons/addon/${amoExtensionId}/versions/${manifest.version}/`;
+    const signingCheckRequest = new Request(signingCheckURL, {
         headers: {
             Accept: 'application/json',
             Authorization: jwt.getToken(),
         },
-        method: 'PUT',
     });
-    console.log('Submitting package to be signed...');
-    console.log(' ', signingRequestURL);
     const {
-        response: signingRequestResponse,
-        data: signingRequestDetails,
-    } = await utils.fetchEx(signingRequest, 'json');
-    if ( signingRequestResponse.ok !== true ) {
-        console.log(`Error: Creating new version failed -- server error ${signingRequestResponse.status}`);
+        response: signingCheckResponse,
+        data: signingCheckDetails,
+    } = await utils.fetchEx(signingCheckRequest, 'json');
+    if ( signingCheckResponse.ok !== true ) {
+        console.log(`Error: AMO lookup failed -- server error ${signingCheckResponse.status}`);
         process.exit(1);
     }
-    console.log('Request for signing self-hosted xpi package succeeded');
-
-    console.log('Waiting for AMO to process the request to sign the self-hosted xpi package...');
-    const signingCheckURL = signingRequestDetails.url;
-    const interval = 180 // check every 3 minutes
-    let countdown = 30 * 60 / interval // for at most 30 minutes
-    let downloadURL;
-    for (;;) {
-        await utils.sleep(60);
-        countdown -= 1
-        if ( countdown <= 0 ) {
-            console.log('Error: AMO signing timed out');
-            process.exit(1);
-        }
-        const signingCheckRequest = new Request(signingCheckURL, {
-            headers: {
-                Accept: 'application/json',
-                Authorization: jwt.getToken(),
-            },
-        });
-        const {
-            response: signingCheckResponse,
-            data: signingCheckDetails,
-        } = await utils.fetchEx(signingCheckRequest, 'json');
-        if ( signingCheckResponse.ok !== true ) {
-            console.log(`Error: AMO signing failed -- server error ${signingCheckResponse.status}`);
-            process.exit(1);
-        }
-        if ( signingCheckDetails.processed !== true ) { continue; }
-        if ( signingCheckDetails.valid !== true ) {
-            console.log('Error: AMO validation failed')
-            process.exit(1);
-        }
-        if ( Array.isArray(signingCheckDetails.files) === false ) { continue; }
-        if ( signingCheckDetails.files.length === 0 ) { continue; }
-        if ( signingCheckDetails.files[0].signed !== true ) { continue; }
-        downloadURL = signingCheckDetails.files[0].download_url;
-        if ( Boolean(downloadURL) === false ) {
-            console.log('Error: AMO signing failed')
-            process.exit(1);
-        }
-        break;
+    const { file } = signingCheckDetails;
+    console.log(`AMO validation: ${file?.status}`);
+    if ( file.status === 'disabled' ) {
+        console.log('Error: AMO signing failed')
+        process.exit(1);
     }
-    console.log('Self-hosted xpi package successfully signed')
+    if ( file.status === 'unreviewed' ) {
+        console.log('Error: AMO signing is pending')
+        process.exit(1);
+    }
+    console.log('Success: xpi package successfully signed')
 
-    console.log(`Downloading signed self-hosted xpi package from ${downloadURL}...`);
-    const downloadRequest = new Request(downloadURL, {
+    console.log(`Downloading signed self-hosted xpi package from ${file.url}...`);
+    const downloadRequest = new Request(file.url, {
         headers: {
             Accept: 'application/octet-stream',
             Authorization: jwt.getToken(),
@@ -148,7 +95,7 @@ async function main() {
     }
 
     await utils.prompt([
-        'Publish to AMO store:',
+        'Upload to GitHub:',
         `  GitHub owner: "${ghapi.details.owner}"`,
         `  GitHub repo: "${ghapi.details.repo}"`,
         `  Release tag: "${ghapi.details.tag}"`,
@@ -167,22 +114,12 @@ async function main() {
         console.log('Error: Unable to find manifest file');
         process.exit(1);
     }
-    // If self-hosted, modify manifest with auto-update information
-    if ( amoChannel === 'unlisted' ) {
-        manifest.browser_specific_settings.gecko.update_url = 
-        `https://raw.githubusercontent.com/${ghapi.details.owner}/${ghapi.details.repo}/master/dist/firefox/updates.json`;
-        const r = await utils.updateManifestInPackage(packagePath, manifest);
-        if ( r !== true ) {
-            console.log('Error: Unable to update manifest file');
-            process.exit(1);
-        }
-    }
 
     const tempDir = await fs.mkdtemp('/tmp/github-asset-');
     const signedPackageName = assetInfo.name.replace('.xpi', '.signed.xpi');
     const signedPackagePath = `${tempDir}/${signedPackageName}`
 
-    await requestSignature(packagePath, signedPackagePath, manifest);
+    await checkSignature(packagePath, signedPackagePath, manifest);
 
     // Upload to GitHub
     const uploadResult = await ghapi.uploadAssetToRelease(signedPackagePath, 'application/zip');

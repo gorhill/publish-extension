@@ -150,10 +150,8 @@ export async function uploadAssetToRelease(assetPath, mimeType) {
         },
         method: 'POST',
     });
-    const { response, data: json } = await fetchEx(request);
+    const { response, data: json } = await fetchEx(request, 'json');
     if ( response === undefined ) { return; }
-    if ( json === undefined ) { return; };
-    console.log(json);
     return json;
 }
 
@@ -161,7 +159,7 @@ export async function uploadAssetToRelease(assetPath, mimeType) {
 
 export async function deleteAssetFromRelease(assetURL) {
     validateGithubToken();
-    print(`Remove ${assetURL} from GitHub release ${githubTag}...`);
+    console.log(`Remove ${assetURL} from GitHub release ${githubTag}...`);
     const request = new Request(assetURL, {
         headers: {
             Authorization: githubAuth,
