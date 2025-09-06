@@ -68,7 +68,6 @@ async function checkSignature(packagePathIn, packagePathOut, manifest) {
     console.log(`Downloading signed self-hosted xpi package from ${file.url}...`);
     const downloadRequest = new Request(file.url, {
         headers: {
-            Accept: 'application/octet-stream',
             Authorization: jwt.getToken(),
         },
     });
