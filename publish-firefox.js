@@ -73,7 +73,9 @@ async function requestSignature(packagePathIn, packagePathOut, manifest) {
         console.log(`Error: Creating new version failed -- server error ${signingRequestResponse.status}`);
         process.exit(1);
     }
-    console.log('Request for signing self-hosted xpi package succeeded');
+    console.log('Request for signing xpi package succeeded');
+
+    if ( amoChannel !== 'unlisted' ) { return; }
 
     console.log('Waiting for AMO to process the request to sign the self-hosted xpi package...');
     const signingCheckURL = signingRequestDetails.url;
@@ -184,24 +186,26 @@ async function main() {
     await requestSignature(packagePath, signedPackagePath, manifest);
 
     // Upload to GitHub
-    const uploadResult = await ghapi.uploadAssetToRelease(signedPackagePath, 'application/zip');
-    if ( uploadResult === undefined ) {
-        console.log(`Failed to upload signed package to ${ghapi.details.owner}/${ghapi.details.repo}/${ghapi.details.tag}`);
-        process.exit(1);
-    }
+    if ( amoChannel === 'unlisted' ) {
+        const uploadResult = await ghapi.uploadAssetToRelease(signedPackagePath, 'application/zip');
+        if ( uploadResult === undefined ) {
+            console.log(`Failed to upload signed package to ${ghapi.details.owner}/${ghapi.details.repo}/${ghapi.details.tag}`);
+            process.exit(1);
+        }
 
-    // Delete unsigned package from GitHub
-    await ghapi.deleteAssetFromRelease(assetInfo.url);
+        // Delete unsigned package from GitHub
+        await ghapi.deleteAssetFromRelease(assetInfo.url);
 
-    // If self-hosted, patch update file and commit
-    if ( amoChannel === 'unlisted' && autoUpdatepath !== '' ) {
-        const r = await ghapi.updateFirefoxAutoUpdateFile(autoUpdatepath, {
-            amoExtensionId,
-            manifest,
-            signedPackageName,
-        });
-        if ( Boolean(r) === false ) {
-            console.log('Auto-update details not brought up to date');
+        // Patch update file and commit
+        if ( autoUpdatepath !== '' ) {
+            const r = await ghapi.updateFirefoxAutoUpdateFile(autoUpdatepath, {
+                amoExtensionId,
+                manifest,
+                signedPackageName,
+            });
+            if ( Boolean(r) === false ) {
+                console.log('Auto-update details not brought up to date');
+            }
         }
     }
 
