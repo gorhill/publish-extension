@@ -21,9 +21,9 @@
 
 import * as fs from 'node:fs/promises';
 import { commandLineArgs, fetchEx } from './utils.js';
+import { getTempDir, shellExec } from './utils.js';
 import path from 'node:path';
 import process from 'node:process';
-import { shellExec } from './utils.js';
 
 /******************************************************************************/
 
@@ -124,7 +124,7 @@ export async function downloadAssetFromRelease(assetInfo) {
     const { response, data } = await fetchEx(request, 'bytes');
     if ( response === undefined ) { return; }
     if ( data === undefined ) { return; }
-    const tempDir = await fs.mkdtemp('/tmp/github-asset-');
+    const tempDir = await getTempDir();
     const fileName = `${tempDir}/${assetInfo.name}`;
     await fs.writeFile(fileName, data);
     return fileName;
@@ -175,25 +175,43 @@ export async function deleteAssetFromRelease(assetURL) {
 export async function updateFirefoxAutoUpdateFile(updateFilePath, details) {
     validateGithubVars();
     const { amoExtensionId, manifest, signedPackageName } = details;
-    if ( amoExtensionId === undefined ) { return; }
-    if ( manifest === undefined ) { return; }
-    if ( signedPackageName === undefined ) { return; }
-    let r = shellExec(`git diff --staged`);
-    if ( r ) { return; }
+    if ( amoExtensionId === undefined ) {
+        console.log(`amoExtensionId = ${amoExtensionId}`);
+        return;
+    }
+    if ( manifest === undefined ) {
+        console.log(`manifest = ${manifest}`);
+        return;
+    }
+    if ( signedPackageName === undefined ) {
+        console.log(`signedPackageName = ${signedPackageName}`);
+        return;
+    }
+    let r = await shellExec(`git diff --staged`);
+    if ( r ) {
+        console.log(`git diff --staged = ${r}`);
+        return;
+    }
     const text = await fs.readFile(updateFilePath, {
         encoding: 'utf8'
     }).catch(reason => {
         console.log(`${reason}`);
     });
-    if ( text === undefined ) { return; }
+    if ( text === undefined ) {
+        console.log(`fs.readFile = ${text}`);
+        return;
+    }
     const data = JSON.parse(text);
     const update = data.addons[amoExtensionId].updates[0];
     update.version = manifest.version;
     update.update_link = `https://github.com/${githubOwner}/${githubRepo}/releases/download/${githubTag}/${signedPackageName}`;
     await fs.writeFile(updateFilePath, JSON.stringify(data, null, 2));
-    shellExec(`git add -u "${updateFilePath}"`);
-    r = shellExec(`git status -s "${updateFilePath}"`);
-    if ( Boolean(r) === false ) { return; }
+    await shellExec(`git add -u "${updateFilePath}"`);
+    r = await shellExec(`git status -s "${updateFilePath}"`);
+    if ( Boolean(r) === false ) {
+        console.log(`git status -s "${updateFilePath}" = ${r}`);
+        return;
+    }
     shellExec(`
         git commit -m 'Make Firefox dev build auto-update' "${updateFilePath}"
         git push origin HEAD

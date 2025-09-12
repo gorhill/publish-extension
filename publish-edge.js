@@ -213,6 +213,7 @@ async function main() {
 }
 
 main().then(result => {
+    utils.cleanDo();
     if ( result !== undefined ) {
         console.log(result);
         process.exit(1);

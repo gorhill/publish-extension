@@ -22,7 +22,6 @@
 import * as fs from 'node:fs/promises';
 import * as ghapi from './github-api.js';
 import * as utils from './utils.js';
-import path from 'node:path';
 import process from 'node:process';
 
 /******************************************************************************/
@@ -104,7 +103,6 @@ async function main() {
         `Publish? (enter "yes"): `,
     ].join('\n'));
 
-    // Fetch asset from GitHub repo
     const packagePath = await ghapi.downloadAssetFromRelease(assetInfo);
     console.log(`Unsigned asset saved at ${packagePath}`);
 
@@ -114,21 +112,26 @@ async function main() {
         process.exit(1);
     }
 
-    const tempDir = await fs.mkdtemp('/tmp/github-asset-');
-    const signedPackageName = assetInfo.name.replace('.xpi', '.signed.xpi');
-    const signedPackagePath = `${tempDir}/${signedPackageName}`
+    // Fetch asset from GitHub repo
+    let signedPackageName = assetInfo.name;
+    let signedPackagePath = packagePath;
+    if ( signedPackageName.includes('.signed.') === false ) {
+        const tempDir = await utils.getTempDir();
+        signedPackageName = assetInfo.name.replace('.xpi', '.signed.xpi');
+        signedPackagePath = `${tempDir}/${signedPackageName}`
 
-    await checkSignature(packagePath, signedPackagePath, manifest);
+        await checkSignature(packagePath, signedPackagePath, manifest);
 
-    // Upload to GitHub
-    const uploadResult = await ghapi.uploadAssetToRelease(signedPackagePath, 'application/zip');
-    if ( uploadResult === undefined ) {
-        console.log(`Failed to upload signed package to ${ghapi.details.owner}/${ghapi.details.repo}/${ghapi.details.tag}`);
-        process.exit(1);
+        // Upload to GitHub
+        const uploadResult = await ghapi.uploadAssetToRelease(signedPackagePath, 'application/zip');
+        if ( uploadResult === undefined ) {
+            console.log(`Failed to upload signed package to ${ghapi.details.owner}/${ghapi.details.repo}/${ghapi.details.tag}`);
+            process.exit(1);
+        }
+
+        // Delete unsigned package from GitHub
+        await ghapi.deleteAssetFromRelease(assetInfo.url);
     }
-
-    // Delete unsigned package from GitHub
-    await ghapi.deleteAssetFromRelease(assetInfo.url);
 
     // If self-hosted, patch update file and commit
     if ( amoChannel === 'unlisted' && autoUpdatepath !== '' ) {
@@ -142,24 +145,11 @@ async function main() {
         }
     }
 
-    // Clean up
-    if ( commandLineArgs.keep !== true ) {
-        {
-            const tmpdir = path.dirname(packagePath);
-            console.log(`Removing ${tmpdir}`);
-            utils.shellExec(`rm -rf "${tmpdir}"`);
-        }
-        {
-            const tmpdir = path.dirname(signedPackagePath);
-            console.log(`Removing ${tmpdir}`);
-            utils.shellExec(`rm -rf "${tmpdir}"`);
-        }
-    }
-
     console.log('Done');
 }
 
 main().then(result => {
+    utils.cleanDo();
     if ( result !== undefined ) {
         console.log(result);
         process.exit(1);

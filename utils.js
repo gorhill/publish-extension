@@ -101,13 +101,12 @@ export async function getManifest(path) {
 /******************************************************************************/
 
 export async function getFileFromPackage(packagePath, needlePath) {
-    const tempDir = await fs.mkdtemp('/tmp/github-deflated-asset-');
+    const tempDir = await getTempDir();
     const filePath = await shellExec(`unzip -Z1 ${packagePath} | grep "${needlePath}"`);
     if ( Boolean(filePath) === false ) { return; }
     await shellExec(`unzip ${packagePath} ${filePath} -d ${tempDir}`);
     const text = await fs.readFile(`${tempDir}/${filePath}`, { encoding: 'utf8' });
     if ( text === undefined ) { return; }
-    await shellExec(`rm -rf "${tempDir}"`);
     return text;
 }
 
@@ -122,7 +121,7 @@ export async function getManifestFromPackage(packagePath) {
 /******************************************************************************/
 
 export async function updateManifestInPackage(packagePath, json) {
-    const tempDir = await fs.mkdtemp('/tmp/github-deflated-asset-');
+    const tempDir = await getTempDir('/tmp/github-deflated-asset-');
     const manifestPath = await shellExec(`unzip -Z1 ${packagePath} | grep manifest.json`);
     if ( Boolean(manifestPath) === false ) { return; }
     const manifestDir = path.dirname(manifestPath);
@@ -131,7 +130,6 @@ export async function updateManifestInPackage(packagePath, json) {
     }
     await fs.writeFile(`${tempDir}/${manifestPath}`, JSON.stringify(json, null, 2));
     await shellExec(`cd ${tempDir} && zip -qr ${packagePath} ${manifestPath} && cd -`);
-    await shellExec(`rm -rf "${tempDir}"`);
     return true;
 }
 
@@ -196,6 +194,37 @@ export async function shellExec(text) {
         command = '';
     }
     return r?.trim();
+}
+
+/******************************************************************************/
+
+const cleanupJobs = [];
+
+export function cleanupAdd(fn) {
+    cleanupJobs.push(fn);
+}
+
+export async function cleanDo() {
+    const promises = [];
+    while ( cleanupJobs.length !== 0 ) {
+        const fn = cleanupJobs.shift();
+        try {
+            promises.push(fn());
+        } catch {
+        }
+    }
+    await Promise.all(promises);
+}
+
+/******************************************************************************/
+
+export async function getTempDir() {
+    const tempDir = await fs.mkdtemp('/tmp/github-asset-');
+    cleanupAdd(( ) => {
+        console.log(`Removing ${tempDir}`);
+        shellExec(`rm -rf "${tempDir}"`);
+    });
+    return tempDir;
 }
 
 /******************************************************************************/

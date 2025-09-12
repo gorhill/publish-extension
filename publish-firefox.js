@@ -179,7 +179,7 @@ async function main() {
         }
     }
 
-    const tempDir = await fs.mkdtemp('/tmp/github-asset-');
+    const tempDir = await utils.getTempDir();
     const signedPackageName = assetInfo.name.replace('.xpi', '.signed.xpi');
     const signedPackagePath = `${tempDir}/${signedPackageName}`
 
@@ -209,24 +209,11 @@ async function main() {
         }
     }
 
-    // Clean up
-    if ( commandLineArgs.keep !== true ) {
-        {
-            const tmpdir = path.dirname(packagePath);
-            console.log(`Removing ${tmpdir}`);
-            utils.shellExec(`rm -rf "${tmpdir}"`);
-        }
-        {
-            const tmpdir = path.dirname(signedPackagePath);
-            console.log(`Removing ${tmpdir}`);
-            utils.shellExec(`rm -rf "${tmpdir}"`);
-        }
-    }
-
     console.log('Done');
 }
 
 main().then(result => {
+    utils.cleanDo();
     if ( result !== undefined ) {
         console.log(result);
         process.exit(1);
