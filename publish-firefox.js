@@ -49,7 +49,11 @@ async function fileFromSync(filePath) {
 /******************************************************************************/
 
 async function requestSignature(packagePathIn, packagePathOut, manifest) {
-    const jwt = new utils.JWT(process.env.AMO_API_KEY, process.env.AMO_SECRET);
+    const [ amoApiKey, amoSecret ] = await Promise.all([
+        utils.getSecret('amo_api_key'),
+        utils.getSecret('amo_secret'),
+    ]);
+    const jwt = new utils.JWT(amoApiKey, amoSecret);
 
     const signingRequestURL =`https://addons.mozilla.org/api/v4/addons/${amoExtensionId}/versions/${manifest.version}/`;
     const formData = new FormData();
@@ -58,7 +62,6 @@ async function requestSignature(packagePathIn, packagePathOut, manifest) {
     const signingRequest = new Request(signingRequestURL, {
         body: formData,
         headers: {
-            Accept: 'application/json',
             Authorization: jwt.getToken(),
         },
         method: 'PUT',
@@ -91,7 +94,6 @@ async function requestSignature(packagePathIn, packagePathOut, manifest) {
         }
         const signingCheckRequest = new Request(signingCheckURL, {
             headers: {
-                Accept: 'application/json',
                 Authorization: jwt.getToken(),
             },
         });

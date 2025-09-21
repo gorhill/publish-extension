@@ -34,13 +34,16 @@ const autoUpdatepath = commandLineArgs.updatepath || '';
 /******************************************************************************/
 
 async function checkSignature(packagePathIn, packagePathOut, manifest) {
-    const jwt = new utils.JWT(process.env.AMO_API_KEY, process.env.AMO_SECRET);
+    const [ amoApiKey, amoSecret ] = await Promise.all([
+        utils.getSecret('amo_api_key'),
+        utils.getSecret('amo_secret'),
+    ]);
+    const jwt = new utils.JWT(amoApiKey, amoSecret);
     console.log('Waiting for AMO to process the request to sign the self-hosted xpi package...');
     const signingCheckURL =
     `https://addons.mozilla.org/api/v5/addons/addon/${amoExtensionId}/versions/${manifest.version}/`;
     const signingCheckRequest = new Request(signingCheckURL, {
         headers: {
-            Accept: 'application/json',
             Authorization: jwt.getToken(),
         },
     });

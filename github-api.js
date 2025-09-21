@@ -21,13 +21,12 @@
 
 import * as fs from 'node:fs/promises';
 import { commandLineArgs, fetchEx } from './utils.js';
-import { getTempDir, shellExec } from './utils.js';
+import { getSecret, getTempDir, shellExec } from './utils.js';
 import path from 'node:path';
-import process from 'node:process';
 
 /******************************************************************************/
 
-const githubAuth = `Bearer ${process.env.GITHUB_TOKEN}`;
+const githubAuth = `Bearer ${await getSecret('github_token')}`;
 const githubOwner = commandLineArgs.ghowner;
 const githubRepo = commandLineArgs.ghrepo;
 const githubTag = commandLineArgs.ghtag;

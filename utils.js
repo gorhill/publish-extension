@@ -229,6 +229,21 @@ export async function getTempDir() {
 
 /******************************************************************************/
 
+// https://grahamwatts.co.uk/gnome-secrets/
+// How to store a secret:
+//   secret-tool store --label="[...]" token [name] 
+
+export async function getSecret(token) {
+    if ( secrets[token] === undefined ) {
+        secrets[token] = await shellExec(`secret-tool lookup token ${token}`);
+    }
+    return secrets[token];
+}
+
+const secrets = {};
+
+/******************************************************************************/
+
 export const commandLineArgs = (( ) => {
     const args = Object.create(null);
     let name, value;

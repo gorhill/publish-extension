@@ -47,8 +47,10 @@ async function extensionNameFromEdgeStore() {
 /******************************************************************************/
 
 async function publishToEdgeStore(filePath) {
-    const edgeApiKey = process.env.EDGE_API_KEY;
-    const edgeClientId = process.env.EDGE_CLIENT_ID;
+    const [ edgeApiKey, edgeClientId ] = await Promise.all([
+        utils.getSecret('edge_apikey'),
+        utils.getSecret('edge_clientid'),
+    ]);
     const uploadURL = `https://api.addons.microsoftedge.microsoft.com/v1/products/${productId}/submissions/draft/package`;
 
     // Read package

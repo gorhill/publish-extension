@@ -49,13 +49,18 @@ async function extensionNameFromCWS() {
 async function publishToCWS(filePath) {
     // Prepare access token
     console.log('Generating access token...');
+    const [ cwsId, cwsSecret, cwsRefresh ] = await Promise.all([
+        utils.getSecret('cws_id'),
+        utils.getSecret('cws_secret'),
+        utils.getSecret('cws_refresh'),
+    ]);
     const authURL = 'https://accounts.google.com/o/oauth2/token';
     const authRequest = new Request(authURL, {
         body: JSON.stringify({
-            client_id: process.env.CWS_ID,
-            client_secret: process.env.CWS_SECRET,
+            client_id: cwsId,
+            client_secret: cwsSecret,
             grant_type: 'refresh_token',
-            refresh_token: process.env.CWS_REFRESH,
+            refresh_token: cwsRefresh,
         }),
         method: 'POST',
     });
