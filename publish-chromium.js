@@ -188,15 +188,6 @@ async function main() {
     // Upload to Chrome Web Store
     await publishToCWS(packagePath);
 
-    // Clean up
-    if ( commandLineArgs.keep !== true ) {
-        {
-            const tmpdir = path.dirname(packagePath);
-            console.log(`Removing ${tmpdir}`);
-            utils.shellExec(`rm -rf "${tmpdir}"`);
-        }
-    }
-
     console.log('Done');
 }
 

@@ -204,13 +204,6 @@ async function main() {
     // Upload to Edge Store
     await publishToEdgeStore(packagePath);
 
-    // Clean up
-    if ( commandLineArgs.keep !== true ) {
-        const tmpdir = path.dirname(packagePath);
-        console.log(`Removing ${tmpdir}`);
-        utils.shellExec(`rm -rf "${tmpdir}"`);
-    }
-
     console.log('Done');
 }
 
