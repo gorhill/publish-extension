@@ -244,6 +244,20 @@ const secrets = {};
 
 /******************************************************************************/
 
+export function intFromVersion(version) {
+    const matches = [ ...version.matchAll(/\d+/g) ];
+    let versionInt = 0;
+    for ( let i = 0; i < 4; i++ ) {
+        const n = i < matches.length
+            ? (parseInt(matches[i][0]) || 0)
+            : 0;
+        versionInt = versionInt * 1000 + n;
+    }
+    return versionInt;
+}
+
+/******************************************************************************/
+
 export const commandLineArgs = (( ) => {
     const args = Object.create(null);
     let name, value;

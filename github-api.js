@@ -21,7 +21,7 @@
 
 import * as fs from 'node:fs/promises';
 import { commandLineArgs, fetchEx } from './utils.js';
-import { getSecret, getTempDir, shellExec } from './utils.js';
+import { getSecret, getTempDir, intFromVersion, shellExec } from './utils.js';
 import path from 'node:path';
 
 /******************************************************************************/
@@ -202,6 +202,10 @@ export async function updateFirefoxAutoUpdateFile(updateFilePath, details) {
     }
     const data = JSON.parse(text);
     const update = data.addons[amoExtensionId].updates[0];
+    if ( intFromVersion(manifest.version) < intFromVersion(update.version) ) {
+        console.log(`New version older than current version: ${update.version} < ${manifest.version}`);
+        return;
+    }
     update.version = manifest.version;
     update.update_link = `https://github.com/${githubOwner}/${githubRepo}/releases/download/${githubTag}/${signedPackageName}`;
     await fs.writeFile(updateFilePath, JSON.stringify(data, null, 2));
