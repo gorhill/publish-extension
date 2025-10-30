@@ -22,7 +22,6 @@
 import * as fs from 'node:fs/promises';
 import * as ghapi from './github-api.js';
 import * as utils from './utils.js';
-import path from 'node:path';
 import process from 'node:process';
 
 /******************************************************************************/
@@ -119,7 +118,7 @@ async function publishToEdgeStore(filePath) {
     console.log('Publish package...')
     const publishURL = `https://api.addons.microsoftedge.microsoft.com/v1/products/${productId}/submissions`;
     const publishNotes = {
-        'Notes': 'See official release notes at <https://github.com/gorhill/uBlock/releases>'
+        'Notes': commandLineArgs.notes || 'Routine update',
     }
     const publishRequest = new Request(publishURL, {
         body: JSON.stringify(publishNotes),
