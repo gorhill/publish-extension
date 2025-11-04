@@ -230,12 +230,26 @@ export async function getTempDir() {
 /******************************************************************************/
 
 // https://grahamwatts.co.uk/gnome-secrets/
-// How to store a secret:
-//   secret-tool store --label="[...]" token [name] 
+// Store:
+//   secret-tool store --label="[...]" token [name]
+//   Enter [secret] at prompt
+// Retrieve:
+//   secret-tool lookup token [name]
+
+// https://scriptingosx.com/2021/04/get-password-from-keychain-in-shell-scripts/
+// Store:
+//   security add-generic-password -s [name] -a "publish-extension" -w "[secret]"
+// Retrieve:
+//   security find-generic-password -w -s [name] -a "publish-extension"
 
 export async function getSecret(token) {
     if ( secrets[token] === undefined ) {
-        secrets[token] = await shellExec(`secret-tool lookup token ${token}`);
+        const platform = await shellExec(`uname`);
+        if ( platform === 'Linux' ) {
+            secrets[token] = await shellExec(`secret-tool lookup token ${token}`);
+        } else if ( platform === 'Darwin' ) {
+            secrets[token] = await shellExec(`security find-generic-password -w -s "${token}" -a "publish-extension"`);
+        }
     }
     return secrets[token];
 }
