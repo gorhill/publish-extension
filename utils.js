@@ -190,7 +190,10 @@ export async function shellExec(text) {
         if ( commandLineArgs.verbose ) {
             console.log(`Executing: ${command}`);
         }
-        r = execSync(command, { encoding: 'utf8' });
+        r = execSync(command, {
+            encoding: 'utf8',
+            stdio: 'inherit',
+        });
         command = '';
     }
     return r?.trim();
