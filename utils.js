@@ -176,7 +176,7 @@ export class JWT {
 
 /******************************************************************************/
 
-export async function shellExec(text) {
+export async function shellExec(text, options = {}) {
     let command = '';
     let r;
     for ( const line of text.split(/[\n\r]+/) ) {
@@ -190,10 +190,7 @@ export async function shellExec(text) {
         if ( commandLineArgs.verbose ) {
             console.log(`Executing: ${command}`);
         }
-        r = execSync(command, {
-            encoding: 'utf8',
-            stdio: 'inherit',
-        });
+        r = execSync(command, Object.assign({ encoding: 'utf8' }, options));
         command = '';
     }
     return r?.trim();

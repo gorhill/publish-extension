@@ -218,6 +218,6 @@ export async function updateFirefoxAutoUpdateFile(updateFilePath, details) {
     shellExec(`
         git commit -m 'Make Firefox dev build auto-update' "${updateFilePath}"
         git push origin HEAD
-    `);
+    `, { stdio: 'inherit' });
     return true;
 }
