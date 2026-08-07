@@ -22,13 +22,20 @@
 import * as fs from 'node:fs/promises';
 import * as ghapi from './github-api.js';
 import * as utils from './utils.js';
-import path from 'node:path';
 import process from 'node:process';
 
 /******************************************************************************/
 
 const commandLineArgs = utils.commandLineArgs;
 const storeId = commandLineArgs.storeid;
+
+const updateXmlTemplate = `<?xml version="1.0" encoding="UTF-8"?>
+<gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
+  <app appid="%extensionId%">
+    <updatecheck codebase="%assetURL%" version="%assetVersion%" />
+  </app>
+</gupdate>
+`;
 
 /******************************************************************************/
 
@@ -46,7 +53,31 @@ async function extensionNameFromCWS() {
 
 /******************************************************************************/
 
-async function publishToCWS(filePath) {
+async function publishToCWS(details) {
+    if ( storeId === undefined ) { return; }
+    const { assetInfo, manifest, packagePath } = details;
+
+    // Confirm the package being uploaded matches the store listing
+    const cwsName = await extensionNameFromCWS();
+    const manifestName = await utils.getExtensionNameFromPackage(packagePath);
+    if ( manifestName && manifestName !== cwsName ) {
+        console.log(`Extension name mismatch between manifest and CWS:\n  "${manifest.name}" != "${cwsName}"`);
+        process.exit(1);
+    }
+
+    await utils.prompt([
+        'Publish to Chrome store:',
+        `  GitHub owner: "${ghapi.details.owner}"`,
+        `  GitHub repo: "${ghapi.details.repo}"`,
+        `  Release tag: "${ghapi.details.tag}"`,
+        `  Asset name: "${assetInfo.name}"`,
+        `  Extension names: "${manifestName}" / "${cwsName}"`,
+        `  Extension id: ${storeId}`,
+        `  Extension version: ${manifest.version}`,
+        `  Extension version name: ${manifest.version_name || '[empty]'}`,
+        `Publish? (enter "yes"): `,
+    ].join('\n'));
+
     // Prepare access token
     console.log('Generating access token...');
     const [ cwsId, cwsSecret, cwsRefresh ] = await Promise.all([
@@ -80,7 +111,7 @@ async function publishToCWS(filePath) {
     const cwsAuth = `Bearer ${responseDict.access_token}`;
 
     // Read package
-    const data = await fs.readFile(filePath);
+    const data = await fs.readFile(packagePath);
 
     // Upload
     console.log('Uploading package...')
@@ -138,6 +169,61 @@ async function publishToCWS(filePath) {
 
 /******************************************************************************/
 
+async function publishToGithub(details) {
+    if ( commandLineArgs.crxupdatepath === undefined ) { return; }
+    if ( commandLineArgs.crxkeytoken === undefined ) { return; }
+    const crxKeyPath = await utils.getSecret(commandLineArgs.crxkeytoken);
+    if ( crxKeyPath === undefined ) { return; }
+
+    const tempDir = await utils.getTempDir();
+    const { packagePath } = details;
+    await utils.shellExec(`unzip ${packagePath} -d ${tempDir}`);
+    const extDir = await utils.shellExec(`unzip -Z1 ${packagePath} | head -n1 | cut -d "/" -f1`);
+
+    // Patch manifest
+    const manifest = structuredClone(details.manifest);
+    manifest.updateURL = `https://github.com/${ghapi.details.owner}/${ghapi.details.repo}/${commandLineArgs.crxupdatepath}`;
+    await fs.writeFile(`${tempDir}/${extDir}/manifest.json`,
+        JSON.stringify(manifest, null, 2)
+    );
+
+    // Create CRX package
+    await utils.shellExec(`chromium \
+        --pack-extension=${tempDir}/${extDir} \
+        --pack-extension-key=${crxKeyPath}
+    `);
+    const { assetInfo } = details;
+    const assetName = assetInfo.name.replace(/\.zip$/, '');
+    await utils.shellExec(`mv ${tempDir}/${extDir}.crx ${tempDir}/${assetName}.crx`);
+
+    // Upload to GitHub
+    const uploadResult = await ghapi.uploadAssetToRelease(`${tempDir}/${assetName}.crx`,
+        'application/x-chrome-package'
+    );
+    if ( uploadResult === undefined ) {
+        console.log(`Failed to upload signed package to ${ghapi.details.owner}/${ghapi.details.repo}/${ghapi.details.tag}`);
+        process.exit(1);
+    }
+
+    // Patch update file
+    // https://github.com/uBlockOrigin/uBlock-issues/discussions/4075#discussioncomment-17923251
+    const extensionId = await utils.shellExec(`openssl pkey \
+        -in ${crxKeyPath} \
+        -pubout \
+        -outform DER | \
+        sha256sum | \
+        cut -c1-32 | \
+        tr 0123456789abcdef abcdefghijklmnop`
+    );
+    let updateXml = updateXmlTemplate;
+    updateXml = updateXml.replace('%extensionId%', extensionId);
+    updateXml = updateXml.replace('%assetURL%', uploadResult.browser_download_url);
+    updateXml = updateXml.replace('%assetVersion%', manifest.version);
+    await fs.writeFile(commandLineArgs.crxupdatepath, updateXml);
+}
+
+/******************************************************************************/
+
 async function main() {
     const assetInfo = await ghapi.getAssetInfo();
     if ( assetInfo === undefined ) {
@@ -147,14 +233,6 @@ async function main() {
     // Fetch asset from GitHub repo
     const packagePath = await ghapi.downloadAssetFromRelease(assetInfo);
     console.log('Asset saved at', packagePath);
-
-    // Confirm the package being uploaded matches the store listing
-    const cwsName = await extensionNameFromCWS();
-    const manifestName = await utils.getExtensionNameFromPackage(packagePath);
-    if ( manifestName && manifestName !== cwsName ) {
-        console.log(`Extension name mismatch between manifest and CWS:\n  "${manifest.name}" != "${cwsName}"`);
-        process.exit(1);
-    }
 
     const manifest = await utils.getManifestFromPackage(packagePath);
     if ( manifest === undefined ) {
@@ -172,21 +250,9 @@ async function main() {
         await utils.updateManifestInPackage(packagePath, manifest);
     }
 
-    await utils.prompt([
-        'Publish to Chrome store:',
-        `  GitHub owner: "${ghapi.details.owner}"`,
-        `  GitHub repo: "${ghapi.details.repo}"`,
-        `  Release tag: "${ghapi.details.tag}"`,
-        `  Asset name: "${assetInfo.name}"`,
-        `  Extension names: "${manifestName}" / "${cwsName}"`,
-        `  Extension id: ${storeId}`,
-        `  Extension version: ${manifest.version}`,
-        `  Extension version name: ${manifest.version_name || '[empty]'}`,
-        `Publish? (enter "yes"): `,
-    ].join('\n'));
-
     // Upload to Chrome Web Store
-    await publishToCWS(packagePath);
+    await publishToCWS({ assetInfo, manifest, packagePath });
+    await publishToGithub({ assetInfo, manifest, packagePath });
 
     console.log('Done');
 }
