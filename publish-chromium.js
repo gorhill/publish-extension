@@ -130,11 +130,11 @@ async function publishToCWS(details) {
     } = await utils.fetchEx(uploadRequest, 'json');
     if ( uploadDict === undefined ) {
         console.error(`Upload failed -- server error ${uploadResponse.statusText}`);
-        process.exit(1)
+        return;
     }
     if ( uploadDict.uploadState !== 'SUCCESS' ) {
         console.error(`Upload failed -- server error ${JSON.stringify(uploadDict)}`);
-        process.exit(1);
+        return;
     }
     console.log('Upload succeeded.')
 
@@ -155,14 +155,14 @@ async function publishToCWS(details) {
     } = await utils.fetchEx(publishRequest, 'json');
     if ( publishDict === undefined ) {
         console.error(`Error: Chrome store publishing failed -- server error ${publishResponse.statusText}`);
-        process.exit(1);
+        return;
     }
     if (
         Array.isArray(publishDict.status) === false ||
         publishDict.status.includes('OK') === false
     ) {
         console.error(`Publishing failed -- server error ${publishDict.status}`);
-        process.exit(1);
+        return;
     }
     console.log('Publishing succeeded.')
 }
@@ -170,7 +170,8 @@ async function publishToCWS(details) {
 /******************************************************************************/
 
 async function publishToGithub(details) {
-    if ( commandLineArgs.crxupdatepath === undefined ) { return; }
+    const { crxupdatepath } = commandLineArgs;
+    if ( crxupdatepath === undefined ) { return; }
     if ( commandLineArgs.crxkeytoken === undefined ) { return; }
     const crxKeyPath = await utils.getSecret(commandLineArgs.crxkeytoken);
     if ( crxKeyPath === undefined ) { return; }
@@ -180,9 +181,10 @@ async function publishToGithub(details) {
     await utils.shellExec(`unzip ${packagePath} -d ${tempDir}`);
     const extDir = await utils.shellExec(`unzip -Z1 ${packagePath} | head -n1 | cut -d "/" -f1`);
 
-    // Patch manifest
+    // Add update URL
+    const branch = await utils.shellExec('git branch --show-current');
     const manifest = structuredClone(details.manifest);
-    manifest.updateURL = `https://github.com/${ghapi.details.owner}/${ghapi.details.repo}/${commandLineArgs.crxupdatepath}`;
+    manifest.updateURL =         `https://raw.githubusercontent.com/${ghapi.details.owner}/${ghapi.details.repo}/${branch}/${crxupdatepath}`;
     await fs.writeFile(`${tempDir}/${extDir}/manifest.json`,
         JSON.stringify(manifest, null, 2)
     );
@@ -219,7 +221,18 @@ async function publishToGithub(details) {
     updateXml = updateXml.replace('%extensionId%', extensionId);
     updateXml = updateXml.replace('%assetURL%', uploadResult.browser_download_url);
     updateXml = updateXml.replace('%assetVersion%', manifest.version);
-    await fs.writeFile(commandLineArgs.crxupdatepath, updateXml);
+    await fs.writeFile(crxupdatepath, updateXml);
+
+    // Commit update file
+    await utils.shellExec(`git add -u "${crxupdatepath}"`);
+    const r = await utils.shellExec(`git status -s "${crxupdatepath}"`);
+    if ( Boolean(r) === false ) {
+        console.log(`git status -s "${crxupdatepath}" = ${r}`);
+        return;
+    }
+    utils.shellExec(`
+        git commit -m 'Make Chromium dev build auto-update' "${crxupdatepath}"
+    `, { stdio: 'inherit' });
 }
 
 /******************************************************************************/
