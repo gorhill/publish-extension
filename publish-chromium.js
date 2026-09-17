@@ -184,7 +184,7 @@ async function publishToGithub(details) {
     // Add update URL
     const branch = await utils.shellExec('git branch --show-current');
     const manifest = structuredClone(details.manifest);
-    manifest.updateURL =         `https://raw.githubusercontent.com/${ghapi.details.owner}/${ghapi.details.repo}/${branch}/${crxupdatepath}`;
+    manifest.update_url = `https://cdn.jsdelivr.net/gh/${ghapi.details.owner}/${ghapi.details.repo}@${branch}/${crxupdatepath}`;
     await fs.writeFile(`${tempDir}/${extDir}/manifest.json`,
         JSON.stringify(manifest, null, 2)
     );
@@ -231,7 +231,7 @@ async function publishToGithub(details) {
         return;
     }
     utils.shellExec(`
-        git commit -m 'Make Chromium dev build auto-update' "${crxupdatepath}"
+        git commit -m 'Make Chromium build auto-update' "${crxupdatepath}"
     `, { stdio: 'inherit' });
 }
 
