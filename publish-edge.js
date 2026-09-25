@@ -28,7 +28,6 @@ import process from 'node:process';
 
 const commandLineArgs = utils.commandLineArgs;
 const storeId = commandLineArgs.storeid;
-const productId = commandLineArgs.productid;
 
 /******************************************************************************/
 
@@ -45,7 +44,7 @@ async function extensionNameFromEdgeStore() {
 
 /******************************************************************************/
 
-async function publishToEdgeStore(filePath) {
+async function publishToEdgeStore(filePath, productId) {
     const [ edgeApiKey, edgeClientId ] = await Promise.all([
         utils.getSecret('edge_apikey'),
         utils.getSecret('edge_clientid'),
@@ -152,6 +151,8 @@ async function main() {
     const packagePath = await ghapi.downloadAssetFromRelease(assetInfo);
     console.log('Asset saved at', packagePath);
 
+    const productId = await utils.getSecret(commandLineArgs.productid);
+
     // Confirm the package being uploaded matches the store listing
     const edgeStoreName = await extensionNameFromEdgeStore();
     const manifestName = await utils.getExtensionNameFromPackage(packagePath);
@@ -201,7 +202,7 @@ async function main() {
     ].join('\n'));
 
     // Upload to Edge Store
-    await publishToEdgeStore(packagePath);
+    await publishToEdgeStore(packagePath, productId);
 
     console.log('Done');
 }
